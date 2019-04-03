@@ -5,8 +5,10 @@ using UnityEngine;
 
 namespace Gonzales.Components
 {
-    public class NavMeshSeeker : IComponentData
+    public struct NavMeshSeeker : IComponentData
     {
     }
+
+    public class NavMeshSeekerComponent : ComponentDataWrapper<NavMeshSeeker> { }
 }
 

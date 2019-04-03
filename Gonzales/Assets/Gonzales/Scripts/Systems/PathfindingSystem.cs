@@ -156,6 +156,92 @@ namespace Gonzales.Systems
             m_pathFailedCallbacks += callback;
         }
 
+        protected override void OnCreateManager()
+        {
+            base.OnCreateManager();
+            m_navWorld = NavMeshWorld.GetDefaultWorld();
+            m_locationQuery = new NavMeshQuery(m_navWorld, Allocator.Persistent);
+            m_availableSlots = new ConcurrentQueue<int>();
+            m_progressQueue = new NativeList<PathQueryData>(MAX_QUERIES, Allocator.Persistent);
+            m_jobHandles = new List<JobHandle>(MAX_QUERIES);
+            m_takenSlots = new List<int>(MAX_QUERIES);
+            m_statuses = new List<NativeArray<int>>(MAX_QUERIES);
+            m_results = new List<NativeArray<NavMeshLocation>>(MAX_QUERIES);
+            m_jobs = new Dictionary<int, UpdateQueryStatusJob>(MAX_QUERIES);
+            m_queries = new NavMeshQuery[MAX_QUERIES];
+            m_queryDatas = new PathQueryData[MAX_QUERIES];
+            
+            for(int i = 0; i < MAX_QUERIES; i++)
+            {
+                m_jobHandles.Add(new JobHandle());
+                m_statuses.Add(new NativeArray<int>(3, Allocator.Persistent));
+                m_results.Add(new NativeArray<NavMeshLocation>(MAX_PATH_SIZE, Allocator.Persistent));
+                m_availableSlots.Enqueue(i);
+            }
+            m_queryQueue = new ConcurrentQueue<PathQueryData>();
+        }
+
+        protected override void OnDestroyManager()
+        {
+            base.OnDestroyManager();
+            m_progressQueue.Dispose();
+            m_locationQuery.Dispose();
+            for(int i = 0; i < m_takenSlots.Count; i++)
+            {
+                m_queries[m_takenSlots[i]].Dispose();
+            }
+            for(int i = 0; i < MAX_QUERIES; i++)
+            {
+                m_statuses[i].Dispose();
+                m_results[i].Dispose();
+            }
+        }
+
+        protected override JobHandle OnUpdate(JobHandle inputDeps)
+        {
+            //  If there are no path jobs to perform then return without doing anything.
+            if (m_queryQueue.Count == 0 && m_availableSlots.Count == MAX_QUERIES)
+            {
+                return inputDeps;
+            }
+
+            int j = 0;
+            //  Loop as long as there is work to do
+            while(m_queryQueue.Count > 0 && m_availableSlots.Count > 0)
+            {
+                //  Try to fetch a pending path job from the Query Queue.
+                PathQueryData pending;
+                if (m_queryQueue.TryDequeue(out pending))
+                {
+                    int slotIndex;
+                    float3[] waypoints;
+                    //  Check if there is an already calculated path between our start and end point, by checking the path cache for our key.
+                    if (USE_CACHE && m_cachedPaths.TryGetValue(pending.Key, out waypoints))
+                    {
+                        m_pathResolvedCallbacks?.Invoke(pending.Id, waypoints);
+                    }
+                    //  Calculate a new path using an available Query slot.
+                    else if (m_availableSlots.TryDequeue(out slotIndex))
+                    {
+
+                    }
+                    //   The slot has already been taken, lets put the pending job back in the queue for later processing.
+                    else
+                    {
+                        Debug.Log("Path Query Slot was not available. Putting job back into queue.");
+                        m_queryQueue.Enqueue(pending);
+                    }
+                }
+                if (j > MAX_QUERIES)
+                {
+                    Debug.LogError("Infinite loop detected, performing a clean job shutdown. This should not happen and must be looked at!");
+                    break;
+                }
+            }
+
+            return base.OnUpdate(inputDeps);
+        }
+
         /// <summary>
         /// Request a path. The ID is for you to identify the path
         /// </summary>
